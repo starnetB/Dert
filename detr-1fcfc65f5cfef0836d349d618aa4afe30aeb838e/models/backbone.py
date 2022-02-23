@@ -61,8 +61,8 @@ class BackboneBase(nn.Module):
         super().__init__()
         for name, parameter in backbone.named_parameters():
             if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
-                parameter.requires_grad_(False)   # 冻结layer2,layer3,layer4,如果train_backone标记为不训练，那么所有梯度都要冻结掉
-        if return_interm_layers:   #这个展示不清楚，是用来干嘛的
+                parameter.requires_grad_(False)   # 如果layer2-4不再模型参数中,或者如果train_backone标记为不训练，那么所有梯度都要冻结掉
+        if return_interm_layers:   
             return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
         else:
             return_layers = {'layer4': "0"}
@@ -74,8 +74,16 @@ class BackboneBase(nn.Module):
         self.tensors = tensors
         self.mask = mask
         '''
+    '''
+    数据的输入是NestedTensor,包括tensor和mask两个成员，tensor就是输入的图像。mask跟tensor同高宽但是单通道。
+
+    关于mask的内容：在util.misc中的collate_fn函数里面可以找到：
+    以整个batch为例，
+    tensors:获取整个batch里面最大的w，h，用0 padding补齐（右，下padding）。
+    mask:宽高与图像对应，除padding位置为true外，其他位置都为false。最后用的时候会取反，就是补全的地方是0，图像填充的地方用1，make sence。
+    '''
     def forward(self, tensor_list: NestedTensor):
-        xs = self.body(tensor_list.tensors)   # 对多个tensors,进行封装，tensor[0]：[batch_size,C,W,H]   xs:[batch_size,2048, H/32, W/32]
+        xs = self.body(tensor_list.tensors)   # tensors：[batch_size,C,W,H]   ["name,xs:[batch_size,2048, H/32, W/32]]
         out: Dict[str, NestedTensor] = {}     # 产生一个dict，一个name，对应于一个NestedTensor
         for name, x in xs.items():
             m = tensor_list.mask
@@ -87,7 +95,7 @@ class BackboneBase(nn.Module):
             # mode(str)：用于采样的算法。'nearest'| 'linear'| 'bilinear'| 'bicubic'| 'trilinear'| 'area'。默认：'nearest'
             # align_corners(bool)：在几何上，我们将输入和输出的像素视为正方形而不是点。如果设置为True，则输入和输出张量按其角像素的中心点对齐，保留角像素处的值。如果设置为False，则输入和输出张量通过其角像素的角点对齐，并且插值使用边缘值填充用于边界外值，使此操作在保持不变时独立于输入大小scale_factor。
             # recompute_scale_facto(bool)：重新计算用于插值计算的 scale_factor。当scale_factor作为参数传递时，它用于计算output_size。如果recompute_scale_factor的False或没有指定，传入的scale_factor将在插值计算中使用。否则，将根据用于插值计算的输出和输入大小计算新的scale_factor（即，如果计算的output_size显式传入，则计算将相同 ）。注意当scale_factor 是浮点数，由于舍入和精度问题，重新计算的 scale_factor 可能与传入的不同。
-            mask = F.interpolate(m[None].float(), size=x.shape[-2:]).to(torch.bool)[0]  #个人估计mask的维度应该和x是一样的
+            mask = F.interpolate(m[None].float(), size=x.shape[-2:]).to(torch.bool)[0]  #。mask跟tensor同高宽但是单通道。
             out[name] = NestedTensor(x, mask)  #tensor_list,中，掩码是同一个吗？
         return out     #out ，是个字典，name就是resnet50的一个输出，key里面包含一个NestedTensor,这个NestedTensor中就一个tensor和对应的掩码流
 
@@ -98,7 +106,6 @@ class Backbone(BackboneBase):  # Base的子类，对base进行补充
                  train_backbone: bool,
                  return_interm_layers: bool,
                  dilation: bool):
-        backbone = getattr(torchvision.models, name)(   # 应该是其他代码里面已经加载好了，我们这边吧resnet50给拿出来，通过name
         """
         :param 传入参数 block: Bottleneck
         :param 传入参数 layers:[3, 4, 6, 3]
@@ -109,14 +116,15 @@ class Backbone(BackboneBase):  # Base的子类，对base进行补充
         :param replace_stride_with_dilation: 是否用空洞卷积替代stride（用不上），空洞卷及可以压缩步长，当操作内容只会被压缩到图片的核心区域，自己想想，但空洞卷，resnet 除了第一层，之外，一共有三层，这三个元素，代表了那些元素需要使用空洞卷及
         :param norm_layer:BatchNorm
         """
+        backbone = getattr(torchvision.models, name)(   # 应该是其他代码里面已经加载好了，我们这边吧resnet50给拿出来，通过name
             replace_stride_with_dilation=[False, False, dilation],
             pretrained=is_main_process(), norm_layer=FrozenBatchNorm2d)
-        num_channels = 512 if name in ('resnet18', 'resnet34') else 2048
+        num_channels = 512 if name in ('resnet18', 'resnet34') else 2048   #最终输出的通道数，根据resnet的类型来确定
         super().__init__(backbone, train_backbone, num_channels, return_interm_layers)
 
 
-class Joiner(nn.Sequential):
-    def __init__(self, backbone, position_embedding):
+class Joiner(nn.Sequential):                           #连接器，将位置编码与backone主体连接起来
+    def __init__(self, backbone, position_embedding):               
         super().__init__(backbone, position_embedding)
 
     def forward(self, tensor_list: NestedTensor):
@@ -124,18 +132,18 @@ class Joiner(nn.Sequential):
         out: List[NestedTensor] = []
         pos = []
         for name, x in xs.items():
-            out.append(x)
-            # position encoding
-            pos.append(self[1](x).to(x.tensors.dtype))
+            out.append(x)              #xs [name, NestedTensor]
+            # position encoding                   
+            pos.append(self[1](x).to(x.tensors.dtype))  # 返回位置编码tensor
 
         return out, pos
 
 
 def build_backbone(args):
-    position_embedding = build_position_encoding(args)
-    train_backbone = args.lr_backbone > 0
-    return_interm_layers = args.masks
-    backbone = Backbone(args.backbone, train_backbone, return_interm_layers, args.dilation)
-    model = Joiner(backbone, position_embedding)
-    model.num_channels = backbone.num_channels
-    return model
+    position_embedding = build_position_encoding(args)   #根据参数构建位置编码 产生一个位置编码模型，计算出的结果[batch_size,channel,h,w]
+    train_backbone = args.lr_backbone > 0  # 标记是否需要冻结所有层
+    return_interm_layers = args.masks     # 需要使用的网络层  有可能使用lay1-3, 也有可能只是使用lay4
+    backbone = Backbone(args.backbone, train_backbone, return_interm_layers, args.dilation)  #产生一个部分的resnet50的模型
+    model = Joiner(backbone, position_embedding)  #将两个模型变成一个模型
+    model.num_channels = backbone.num_channels    # 最终输出的通道数，正常应该backone的输出维度
+    return model   # 输出backbone 与position_embedding 的联合模型
