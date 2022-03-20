@@ -103,17 +103,22 @@ def get_args_parser():
 
 
 def main(args):
+    
     utils.init_distributed_mode(args)
     print("git:\n  {}\n".format(utils.get_sha()))
 
+    # frozen_weights 冻结参数 str
     if args.frozen_weights is not None:
         assert args.masks, "Frozen training is meant for segmentation only"
     print(args)
 
+    # cuda or cpu
     device = torch.device(args.device)
 
     # fix the seed for reproducibility
+    # 复现的随机数种子
     seed = args.seed + utils.get_rank()
+    # 各个组件加载的随机数种子
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -241,8 +246,20 @@ def main(args):
 
 
 if __name__ == '__main__':
+    '''
+    @ description 描述
+    @ parents 提前包含的参数
+    '''
     parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])
     args = parser.parse_args()
+    '''
+    @ output_dir  参数中的输出路径，默认是当前路径
+    '''
     if args.output_dir:
+        '''
+        @ parents：是否创建父目录，True等同mkdir -p;False时，父目录不存在，则抛出FileNotFoundError
+        @ exist_ok：在3.5版本加入。False时，路径存在，抛出FileExistsError;True时，FileExistsError被忽略
+        '''
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+
     main(args)

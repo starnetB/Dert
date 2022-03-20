@@ -368,27 +368,35 @@ def save_on_master(*args, **kwargs):
 
 
 def init_distributed_mode(args):
+    # 这里应该是使用本地GPU的一些设定，这些参数到底怎么用，还有待考证
+    # 使用了分布式pytroch的分布式训练方法，数据分布式加上AllReduce
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ['WORLD_SIZE'])
         args.gpu = int(os.environ['LOCAL_RANK'])
+    # 这里应该用到了超算中心
     elif 'SLURM_PROCID' in os.environ:
         args.rank = int(os.environ['SLURM_PROCID'])
         args.gpu = args.rank % torch.cuda.device_count()
+    # 如果没有以上参数被设定，那么我就不需要使用分布式计算了
     else:
         print('Not using distributed mode')
         args.distributed = False
         return
 
     args.distributed = True
-
+    # 获取GPU编号，以上参数设定过了
     torch.cuda.set_device(args.gpu)
+    # nccl编号
     args.dist_backend = 'nccl'
     print('| distributed init (rank {}): {}'.format(
         args.rank, args.dist_url), flush=True)
+    # init_method 表示0节点的地址
     torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                                          world_size=args.world_size, rank=args.rank)
+    # 这里阻塞进程，让所有进程都完成初始化
     torch.distributed.barrier()
+    # 如果当前进程rank==0 那么在这台机器上安装分布式训练主机
     setup_for_distributed(args.rank == 0)
 
 

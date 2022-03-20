@@ -306,6 +306,8 @@ def build(args):
     if args.dataset_file == "coco_panoptic":
         num_classes = 250
     device = torch.device(args.device)
+    # 这边构建build_backbone
+    # # 输出backbone 与position_embedding 的联合模型
 
     backbone = build_backbone(args)
 
