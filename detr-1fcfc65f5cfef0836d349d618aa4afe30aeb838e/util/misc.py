@@ -301,6 +301,7 @@ def nested_tensor_from_tensor_list(tensor_list: List[Tensor]):
 
 
 class NestedTensor(object):
+    
     def __init__(self, tensors, mask: Optional[Tensor]):
         self.tensors = tensors
         self.mask = mask

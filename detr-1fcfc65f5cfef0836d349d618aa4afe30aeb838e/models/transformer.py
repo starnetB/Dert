@@ -22,10 +22,12 @@ class Transformer(nn.Module):
                  activation="relu", normalize_before=False,
                  return_intermediate_dec=False):
         super().__init__()
-
+        # dim_feedfordward 中间深度 
+        # [seq,batch__size,512]->[seq,batch_size,512]
         encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward,
                                                 dropout, activation, normalize_before)
-        encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
+        # 层正则化，在seq维度上进行正则化
+        encoder_norm = nn.LayerNorm(d_model) if normalize_before else None  
         self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward,
@@ -56,6 +58,7 @@ class Transformer(nn.Module):
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
         hs = self.decoder(tgt, memory, memory_key_padding_mask=mask,
                           pos=pos_embed, query_pos=query_embed)
+        # HWxNxC-> hs[HWxCxN]
         return hs.transpose(1, 2), memory.permute(1, 2, 0).view(bs, c, h, w)
 
 
@@ -109,6 +112,7 @@ class TransformerDecoder(nn.Module):
                            tgt_key_padding_mask=tgt_key_padding_mask,
                            memory_key_padding_mask=memory_key_padding_mask,
                            pos=pos, query_pos=query_pos)
+
             if self.return_intermediate:
                 intermediate.append(self.norm(output))
 
@@ -129,6 +133,10 @@ class TransformerEncoderLayer(nn.Module):
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
                  activation="relu", normalize_before=False):
         super().__init__()
+
+        # d_model=512 表示词嵌入模型维度
+        # nhead=8 多头数量
+        # dim_feedforward=2048
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         # Implementation of Feedforward model
         self.linear1 = nn.Linear(d_model, dim_feedforward)
@@ -152,12 +160,20 @@ class TransformerEncoderLayer(nn.Module):
                      src_key_padding_mask: Optional[Tensor] = None,
                      pos: Optional[Tensor] = None):
         q = k = self.with_pos_embed(src, pos)
+        # 这里有两个参数进行解释下
+        # @ key_padding_mask=[[False,False,False,True]] ->[["I","am","lees","<pad>"]]
+        # @ attn_mask=[1,0,0]
+        #             [1,1,0]
+        #             [1,1,1]
+        # @ attn_mask作用如下[a,b,c] ,a->a
+        #                           ,a,b->a,b
+        #                           ,a,b,c->a,b,c 使得前面的不会去注意后面的内容。
         src2 = self.self_attn(q, k, value=src, attn_mask=src_mask,
-                              key_padding_mask=src_key_padding_mask)[0]
-        src = src + self.dropout1(src2)
-        src = self.norm1(src)
-        src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
-        src = src + self.dropout2(src2)
+                              key_padding_mask=src_key_padding_mask)[0]  #多头部分
+        src = src + self.dropout1(src2) # concat 部分
+        src = self.norm1(src)           # 层正则化部分
+        src2 = self.linear2(self.dropout(self.activation(self.linear1(src)))) #前向传播
+        src = src + self.dropout2(src2)  #concat部分
         src = self.norm2(src)
         return src
 
@@ -165,6 +181,7 @@ class TransformerEncoderLayer(nn.Module):
                     src_mask: Optional[Tensor] = None,
                     src_key_padding_mask: Optional[Tensor] = None,
                     pos: Optional[Tensor] = None):
+        # self.normalize_before=True，则提前正则化
         src2 = self.norm1(src)
         q = k = self.with_pos_embed(src2, pos)
         src2 = self.self_attn(q, k, value=src2, attn_mask=src_mask,

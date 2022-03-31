@@ -7,6 +7,8 @@ from torchvision.ops.boxes import box_area
 
 
 def box_cxcywh_to_xyxy(x):
+    # torch.unbind(input ,dim=0)
+    # remove a tensor dimension
     x_c, y_c, w, h = x.unbind(-1)
     b = [(x_c - 0.5 * w), (y_c - 0.5 * h),
          (x_c + 0.5 * w), (y_c + 0.5 * h)]
@@ -21,18 +23,24 @@ def box_xyxy_to_cxcywh(x):
 
 
 # modified from torchvision to also return the union
-def box_iou(boxes1, boxes2):
-    area1 = box_area(boxes1)
+# boxes1 of dim [N,4]
+# boxes2 of dim [M,3]
+def box_iou(boxes1, boxes2):   
+    area1 = box_area(boxes1)   
     area2 = box_area(boxes2)
 
+    # find the intersection coordinates 
     lt = torch.max(boxes1[:, None, :2], boxes2[:, :2])  # [N,M,2]
     rb = torch.min(boxes1[:, None, 2:], boxes2[:, 2:])  # [N,M,2]
 
+    # find the intersection area
     wh = (rb - lt).clamp(min=0)  # [N,M,2]
     inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
 
+    # compute the union area
     union = area1[:, None] + area2 - inter
 
+    # compute the iou
     iou = inter / union
     return iou, union
 
@@ -48,6 +56,7 @@ def generalized_box_iou(boxes1, boxes2):
     """
     # degenerate boxes gives inf / nan results
     # so do an early check
+    # 确保bbox的左上角的坐标不会大于右下角度的坐标
     assert (boxes1[:, 2:] >= boxes1[:, :2]).all()
     assert (boxes2[:, 2:] >= boxes2[:, :2]).all()
     iou, union = box_iou(boxes1, boxes2)

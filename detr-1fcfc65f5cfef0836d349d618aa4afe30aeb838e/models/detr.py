@@ -20,6 +20,7 @@ from .transformer import build_transformer
 
 class DETR(nn.Module):
     """ This is the DETR module that performs object detection """
+
     def __init__(self, backbone, transformer, num_classes, num_queries, aux_loss=False):
         """ Initializes the model.
         Parameters:
@@ -60,12 +61,17 @@ class DETR(nn.Module):
             samples = nested_tensor_from_tensor_list(samples)
         features, pos = self.backbone(samples)
 
+        # features[-1] NestedTensor
         src, mask = features[-1].decompose()
         assert mask is not None
         hs = self.transformer(self.input_proj(src), mask, self.query_embed.weight, pos[-1])[0]
-
-        outputs_class = self.class_embed(hs)
+        # hs=[1,batch_size,hxw,channel=512]
+        outputs_class = self.class_embed(hs)  # hs=[1,batch_size,hxw,num_classes + 1]
+        # output_coor=self.bbox_embed(hs).sigmod()  # [1,batch_size,hxw,4]
         outputs_coord = self.bbox_embed(hs).sigmoid()
+
+        # outputs_class[-1]:batch_size,hxw,num_classes + 1
+        # outputs_coord[-1]:batch_size,hxw,4
         out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
         if self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord)
@@ -86,6 +92,7 @@ class SetCriterion(nn.Module):
         1) we compute hungarian assignment between ground truth boxes and the outputs of the model
         2) we supervise each pair of matched ground-truth / prediction (supervise class and box)
     """
+
     def __init__(self, num_classes, matcher, weight_dict, eos_coef, losses):
         """ Create the criterion.
         Parameters:
@@ -132,7 +139,7 @@ class SetCriterion(nn.Module):
         This is not really a loss, it is intended for logging purposes only. It doesn't propagate gradients
         """
         pred_logits = outputs['pred_logits']
-        device = pred_logits.device
+        device = pred_logits.额
         tgt_lengths = torch.as_tensor([len(v["labels"]) for v in targets], device=device)
         # Count the number of predictions that are NOT "no-object" (which is the last class)
         card_pred = (pred_logits.argmax(-1) != pred_logits.shape[-1] - 1).sum(1)
@@ -308,11 +315,13 @@ def build(args):
     device = torch.device(args.device)
     # 这边构建build_backbone
     # # 输出backbone 与position_embedding 的联合模型
-
     backbone = build_backbone(args)
 
     transformer = build_transformer(args)
 
+    # outputs_class[-1]:batch_size,hxw,num_classes + 1
+    # outputs_coord[-1]:batch_size,hxw,4
+    # out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
     model = DETR(
         backbone,
         transformer,
@@ -320,14 +329,19 @@ def build(args):
         num_queries=args.num_queries,
         aux_loss=args.aux_loss,
     )
+    # 暂时空掉
     if args.masks:
         model = DETRsegm(model, freeze_detr=(args.frozen_weights is not None))
-    matcher = build_matcher(args)
+    #
+    matcher = build_matcher(args)  # return [bs,2,num_obj]
+    # 'loss_ce' 损失系数
+    # 'loss_bbox' args.bbox_loss_coef  bbox损失系数
+    # 'loss'.giou _loss_coef
     weight_dict = {'loss_ce': 1, 'loss_bbox': args.bbox_loss_coef}
     weight_dict['loss_giou'] = args.giou_loss_coef
     if args.masks:
-        weight_dict["loss_mask"] = args.mask_loss_coef
-        weight_dict["loss_dice"] = args.dice_loss_coef
+        weight_dict["loss_mask"] = args.mask_loss_coef  # 损失系数掩码流
+        weight_dict["loss_dice"] = args.dice_loss_coef   #
     # TODO this is a hack
     if args.aux_loss:
         aux_weight_dict = {}

@@ -4,7 +4,9 @@ Transforms and data augmentation for both image + bbox.
 """
 import random
 
+# 图像库类，用cv岂不是更香？
 import PIL
+
 import torch
 import torchvision.transforms as T
 import torchvision.transforms.functional as F
@@ -22,6 +24,7 @@ def crop(image, target, region):
     # should we do something wrt the original size?
     target["size"] = torch.tensor([h, w])
 
+    
     fields = ["labels", "area", "iscrowd"]
 
     if "boxes" in target:
@@ -48,6 +51,7 @@ def crop(image, target, region):
             cropped_boxes = target['boxes'].reshape(-1, 2, 2)
             keep = torch.all(cropped_boxes[:, 1, :] > cropped_boxes[:, 0, :], dim=1)
         else:
+            
             keep = target['masks'].flatten(1).any(1)
 
         for field in fields:
@@ -127,6 +131,8 @@ def resize(image, target, size, max_size=None):
 
     if "masks" in target:
         target['masks'] = interpolate(
+            #后面增加一个维度，因为，interploate 中调用的api支持4维度或5维度的tensor
+            #采用最临近插值
             target['masks'][:, None].float(), size, mode="nearest")[:, 0] > 0.5
 
     return rescaled_image, target

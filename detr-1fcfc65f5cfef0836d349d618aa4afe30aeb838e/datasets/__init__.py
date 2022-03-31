@@ -9,9 +9,11 @@ def get_coco_api_from_dataset(dataset):
     for _ in range(10):
         # if isinstance(dataset, torchvision.datasets.CocoDetection):
         #     break
+        # 如果传入的是一个Subset没那么返回这个Subset的数据集本身
         if isinstance(dataset, torch.utils.data.Subset):
             dataset = dataset.dataset
     if isinstance(dataset, torchvision.datasets.CocoDetection):
+        # 返回一个coco数据集
         return dataset.coco
 
 

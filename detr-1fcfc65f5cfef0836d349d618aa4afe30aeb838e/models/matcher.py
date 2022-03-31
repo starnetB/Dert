@@ -26,6 +26,7 @@ class HungarianMatcher(nn.Module):
             cost_giou: This is the relative weight of the giou loss of the bounding box in the matching cost
         """
         super().__init__()
+        # 权重保存
         self.cost_class = cost_class
         self.cost_bbox = cost_bbox
         self.cost_giou = cost_giou
@@ -42,8 +43,9 @@ class HungarianMatcher(nn.Module):
 
             targets: This is a list of targets (len(targets) = batch_size), where each target is a dict containing:
                  "labels": Tensor of dim [num_target_boxes] (where num_target_boxes is the number of ground-truth
-                           objects in the target) containing the class labels
-                 "boxes": Tensor of dim [num_target_boxes, 4] containing the target box coordinates
+                           objects in the target) containing the class labels,so it should be [batch_size,num_target_boxes] 
+                 "boxes": Tensor of dim [num_target_boxes, 4] containing the target box coordinates  ,Tensor of dim likes
+                          [batch_size,num_target_boxes,4]
 
         Returns:
             A list of size batch_size, containing tuples of (index_i, index_j) where:
@@ -51,6 +53,7 @@ class HungarianMatcher(nn.Module):
                 - index_j is the indices of the corresponding selected targets (in order)
             For each batch element, it holds:
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
+            A list of size is [batch_size,min(num_queries,num_target_boxes)]
         """
         bs, num_queries = outputs["pred_logits"].shape[:2]
 
@@ -59,28 +62,40 @@ class HungarianMatcher(nn.Module):
         out_bbox = outputs["pred_boxes"].flatten(0, 1)  # [batch_size * num_queries, 4]
 
         # Also concat the target labels and boxes
-        tgt_ids = torch.cat([v["labels"] for v in targets])
-        tgt_bbox = torch.cat([v["boxes"] for v in targets])
+        tgt_ids = torch.cat([v["labels"] for v in targets])  #[batch_size*obj_num]            # obj_num is not constant
+        tgt_bbox = torch.cat([v["boxes"] for v in targets])  #[batch_size*obj_num,4]
 
         # Compute the classification cost. Contrary to the loss, we don't use the NLL,
         # but approximate it in 1 - proba[target class].
         # The 1 is a constant that doesn't change the matching, it can be ommitted.
-        cost_class = -out_prob[:, tgt_ids]
+        # cost_class 每一行代表这预测一个bbox类别，与target类别之间的对应得分
+        # Each row of cost_class represents the corresponding core 
+        # between the predicted bbox category and the target category
+        cost_class = -out_prob[:, tgt_ids]  #[batch_size * num_queries,batch_size*obj_num]  
 
         # Compute the L1 cost between boxes
-        cost_bbox = torch.cdist(out_bbox, tgt_bbox, p=1)
+        # Each row of cost_bbox represents the corresponding core of L1 regularization 
+        # between the predicted out_bbox coordinate and the tgt_box_coordinate 
+        cost_bbox = torch.cdist(out_bbox, tgt_bbox, p=1)  #[batch_size * num_queries,batch_size*obj_num] 
 
         # Compute the giou cost betwen boxes
+        # [batch_size * num_queries,batch_size*obj_num]
         cost_giou = -generalized_box_iou(box_cxcywh_to_xyxy(out_bbox), box_cxcywh_to_xyxy(tgt_bbox))
 
         # Final cost matrix
         C = self.cost_bbox * cost_bbox + self.cost_class * cost_class + self.cost_giou * cost_giou
+        # C size [bs,num_queries,bs*num_obj]
         C = C.view(bs, num_queries, -1).cpu()
 
         sizes = [len(v["boxes"]) for v in targets]
+        # c[i]  [num_queries,num_obj]  num_queries,num_obj, 每个图 预测框与真实框对关系  nu_queries就是预测狂 ，nb就是True框
         indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
+        # 返回二部图，点对匹配 size(bs,2,num_obj) 0 is pred and 1 is true
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
 
 def build_matcher(args):
+    # cost_class:类别权重
+    # cost_bbox:类别权重
+    # cost_args.set_cost_giou:并交比权重
     return HungarianMatcher(cost_class=args.set_cost_class, cost_bbox=args.set_cost_bbox, cost_giou=args.set_cost_giou)
