@@ -26,7 +26,14 @@ def get_args_parser():
     parser.add_argument('--output_dir', default='',
                         help='path where to save, empty for no saving')
     parser.add_argument('--seed', default=42, type=int)
+
+    # * Segmentation
+    parser.add_argument('--masks', action='store_true',
+                        help="Train segmentation head if the flag is provided")
+    # coco dataset
     parser.add_argument('--dataset_file', default='coco')
+    parser.add_argument('--coco_path', type=str)
+    parser.add_argument('--coco_panoptic_path', type=str)
     return parser
 
 def main(args):

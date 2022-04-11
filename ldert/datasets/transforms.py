@@ -180,3 +180,142 @@ def pad(image,target,padding):
     if "masks" in target:
         target['masks']=torch.nn.functional.pad(target['masks'],(0,padding[0],0,padding[1]))
     return padded_image,target
+
+class RandomCrop(object):
+    def __init__(self,size):
+        self.size=size
+
+    def __call__(self,img,target):
+        # i, j, h, w = region
+        region=T.RandomCrop.get_params(img,self.size)
+        return crop(img,target,region) #return cropped_image, target
+
+class RandomSizeCrop(object):
+    def __init__(self,min_size:int,max_size:int):
+        self.min_size=min_size
+        self.max_size=max_size
+    
+    def __call__(self, img:PIL.Image.Image,target:dict):
+        w=random.randint(self.min_size,min(img.width,self.max_size))
+        h=random.randint(self.min_size,min(img.height,self.max_size))
+        region=T.RandomCrop.get_params(img,[h,w])
+        # i, j, h, w = region
+        return crop(img,target,region)  #return cropped_image, target
+
+class CenterCrop(object):
+    def __init__(self,size):
+        self.size=size
+    
+    def __call__(self, img,target):
+        image_width,image_height=img.size
+        crop_height,crop_width=self.size
+        crop_top=int(round((image_height-crop_height)/2.))
+        crop_left=int(round((image_width-crop_width)/2.))
+        return crop(img,target,(crop_top,crop_left,crop_height,crop_width))
+
+# 随机水平反转
+class RandomHorizontalFlip(object):
+    def __init__(self,p=0.5):
+        self.p=p
+    
+    def __call__(self, img,target):
+        if random.random()<self.p:
+            return hflip(img,target)
+        return img,target
+
+ #print "choice([1, 2, 3, 5, 9]) : ", random.choice([1, 2, 3, 5, 9])
+        #choice([1, 2, 3, 5, 9]) :  2
+# 随机定义图片的大小
+class RandomResize(object):
+    def __init__(self,sizes,max_size=None):
+        assert isinstance(sizes,(list,tuple))
+        self.sizes=sizes
+        self.max_size=max_size
+    
+    def __call__(self,img,target=None):
+        size=random.choice(self.sizes)
+        return resize(img,target,size,self.max_size)
+
+# 随机填充
+class RandomPad(object):
+    def __init__(self,max_pad):
+        self.max_pad=max_pad
+    
+    def __call__(self,img,target):
+        pad_x=random.randint(0,self.max_pad)
+        pad_y=random.randint(0,self.max_pad)
+        return pad(img,target,(pad_x,pad_y))
+
+# 随机选择一种转换方法
+class RandomSelect(object):
+    """
+    Randomly selects between transforms1 and transforms2,
+    with probability p for transforms1 and (1 - p) for transforms2
+    """
+    def __init__(self,transforms1,transforms2,p=0.5):
+        self.transforms1=transforms1
+        self.transforms2=transforms2
+        self.p=p
+    
+    def __call__(self, img,target):
+        if random.random()<self.p:
+            return self.transforms1(img,target)
+        return self.transforms2(img,target)
+
+class ToTensor(object):
+    def __call__(self, img,target):
+        return F.to_tensor(img),target  
+
+# class torchvision.transforms.RandomErasing(p=0.5, 
+# scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0, inplace=False)
+#
+''' 
+p-执行随机擦除操作的概率。
+scale-擦除区域与输入图像的比例范围。
+ratio-擦除区域的纵横比范围。
+value-擦除价值。默认为 0。如果是单个 int，则用于擦除所有像素。如果是长度为 3 的元组，则分别用于擦除 R、G、B 通道。如果 str 为 ‘random’，则使用随机值擦除每个像素。
+inplace-布尔值以使此转换就地。默认设置为 False。
+
+'''
+class RandomErasing(object):
+    def __init__(self,*args,**kwargs):
+        self.eraser=T.RandomErasing(*args,**kwargs)
+
+    def __call__(self, img,target):
+        return self.eraser(img),target 
+
+# 归一化，boxes变成整图的比例
+class Normalize(object):
+    def __init__(self,mean,std):
+        self.mean=mean
+        self.std=std
+    
+    def __call__(self, image,target=None):
+        image=F.normalize(image,mean=self.mean,std=self.std)
+        if target is None:
+            return image,None
+        target=target.copy()
+        h,w=image.shape[-2:]
+        if "boxes" in target:
+            boxes=target["boxes"]
+            boxes=box_xyxy_to_cxcywh(boxes)
+            boxes=boxes/torch.tensor([w,h,w,h],dtype=torch.float32)
+            target["boxes"]=boxes  
+        return image,target
+
+class Compose(object):
+    def __init__(self,transforms):
+        self.transforms=transforms
+    
+    def __call__(self, image,target):
+        for t in self.transforms:
+            image,target=t(image,target)
+        return image,target
+    
+    def __repr__(self):
+        format_string=self.__class__.__name__+"("
+        for t in self.transforms:
+            format_string +="\n"
+            format_string +="    {0}".format(t)
+        format_string+="\n"
+        return format_string
